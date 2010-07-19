@@ -283,8 +283,11 @@ int _tmain(int argc, _TCHAR* argv[])
 	c._up = Vec3(0,1,0);
 
 	bool done = false;
+  bool first_time = true;
 	while (!done) {
+
 		SDL_Event event;
+    bool redraw = false;
 		if (SDL_PollEvent(&event)) {
 			switch(event.type) {
 			
@@ -294,33 +297,37 @@ int _tmain(int argc, _TCHAR* argv[])
 
 			case SDL_KEYUP:
 				switch (event.key.keysym.sym) {
-				case SDLK_UP: c._pos.y -= 1; break;
-				case SDLK_DOWN: c._pos.y += 1; break;
-				case SDLK_LEFT: c._pos.x -= 1; break;
-				case SDLK_RIGHT: c._pos.x += 1; break;
+				case SDLK_UP: c._pos.y -= 1; redraw = true; break;
+				case SDLK_DOWN: c._pos.y += 1; redraw = true; break;
+				case SDLK_LEFT: c._pos.x -= 1; redraw = true; break;
+				case SDLK_RIGHT: c._pos.x += 1; redraw = true; break;
 				}
 				break;
 			}
 		}
 
-		c._dir = normalize(Vec3(0,0,-200) - c._pos);
+    if (redraw || first_time) {
+      first_time = false;
+      c._dir = normalize(Vec3(0,0,-200) - c._pos);
 
-		// scale the view plane by the aspect ratio of the bitmap to get square pixels
-		const float aspect = (float)width / height;
-		const float size = 10;
-		c._u0 = -aspect * size;
-		c._u1 = +aspect * size;
-		c._v0 = -size;
-		c._v1 = +size;
-		c._dist = 100;
+      // scale the view plane by the aspect ratio of the bitmap to get square pixels
+      const float aspect = (float)width / height;
+      const float size = 10;
+      c._u0 = -aspect * size;
+      c._u1 = +aspect * size;
+      c._v0 = -size;
+      c._v1 = +size;
+      c._dist = 100;
 
-		c.create_frame();
+      c.create_frame();
 
-		SDL_LockSurface(screen);
-		render(c, screen->pixels, screen->w, screen->h);
-		SDL_UnlockSurface(screen);
+      SDL_LockSurface(screen);
+      render(c, screen->pixels, screen->w, screen->h);
+      SDL_UnlockSurface(screen);
 
-		SDL_Flip(screen);
+      SDL_Flip(screen);
+
+    }
 
 	}
 
