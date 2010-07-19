@@ -3,7 +3,6 @@ Release/
 data/scenes/
 ipch/
 *.ilk
-*.lib
 *.pdb
 *.pyd
 *.pyc
