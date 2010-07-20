@@ -6,7 +6,20 @@
 #include <math.h>
 #include <stdio.h>
 #include <vector>
+#include <assert.h>
+
+extern "C"
+{
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
+};
+
 #pragma comment(lib, "sdl.lib")
+#pragma comment(lib, "winmm.lib")
+
+SDL_Surface *g_font = NULL;
+SDL_Surface *g_screen  = NULL;
 
 // we use a right-handed coordinate system (yes, this is going to confuse the hell out of me :)
 
@@ -166,6 +179,8 @@ struct Object
 	virtual Vec3 calc_normal(const Vec3& p) const = 0;
 };
 
+typedef std::vector<Object *> Objects;
+
 struct Sphere : public Object
 {
 	Sphere() {};
@@ -192,8 +207,8 @@ bool Sphere::intersect(const Vec3& o, const Vec3& d, float *t) const
 	if (discriminant < 0)
 		return false;
 
-	const float t0 = -B + sqrtf(discriminant) / 2 * A;
-	const float t1 = -B - sqrtf(discriminant) / 2 * A;
+	const float t0 = (-B + sqrtf(discriminant)) / (2 * A);
+	const float t1 = (-B - sqrtf(discriminant)) / (2 * A);
 
 	*t = t1 >= 0 ? t1 : t0;
 	return true;
@@ -202,16 +217,6 @@ bool Sphere::intersect(const Vec3& o, const Vec3& d, float *t) const
 Vec3 Sphere::calc_normal(const Vec3& p) const
 {
 	return normalize(p - c);
-}
-
-void create_ortho_ray(int x, int y, const Camera& cam, Vec3 *pos, Vec3 *dir)
-{
-	// orographic
-
-}
-
-void create_ray(int x, int y, Vec3 *pos, Vec3 *dir)
-{
 }
 
 
@@ -223,17 +228,20 @@ struct BGRA32
 	uint8_t a;
 };
 
-void render(const Camera& c, void *ptr, int width, int height)
+void render(const Camera& c, const Objects& objects, void *ptr, int width, int height)
 {
-	typedef std::vector<Object *> Objects;
-	Objects objects;
-	objects.push_back(new Sphere(Vec3(-10, 0, -200), 10));
-	objects.push_back(new Sphere(Vec3(+10, 0, -200), 10));
-	objects.push_back(new Sphere(Vec3(0, 0, -240), 10));
-
 	Vec3 o, d;
-
 	Vec3 light_pos(0,100,-200);
+
+	Vec3 o0, d0;
+	Vec3 o1, d1;
+	Vec3 o2, d2;
+	Vec3 o3, d3;
+
+	c.ray_from_pixel(0, 0, width, height, &o0, &d0);
+	c.ray_from_pixel(width-1, 0, width, height, &o1, &d1);
+	c.ray_from_pixel(0, height-1, width, height, &o2, &d2);
+	c.ray_from_pixel(width-1, height-1, width, height, &o3, &d3);
 
 	float t;
 	BGRA32 *p = (BGRA32 *)ptr;
@@ -255,7 +263,7 @@ void render(const Camera& c, void *ptr, int width, int height)
 				Vec3 p0 = o + min_t * d;
 				Vec3 l = normalize(light_pos - p0);
 				Vec3 n = objects[idx]->calc_normal(p0);
-				p->r = p->g = p->b = p->a = (uint8_t)(255 * dot(n, l));
+				p->r = p->g = p->b = p->a = (uint8_t)(255 * max(0, dot(n, l)));
 			} else {
 				p->r = p->g = p->b = p->a = 0;
 			}
@@ -264,23 +272,95 @@ void render(const Camera& c, void *ptr, int width, int height)
 		}
 	}
 
-	for (int i = 0; i < (int)objects.size(); ++i)
-		delete objects[i];
-	objects.clear();
+}
+
+/*
+bool load_scene(const char *filename, lua_State **ll)
+{
+	lua_State *l = *ll = lua_open();
+	if (l == NULL)
+		return false;
+	luaL_openlibs(l);
+
+	if (luaL_loadfile(l,  filename))
+		return false;
+
+	return true;
+}
+*/
+
+struct CSDL_Rect : public SDL_Rect
+{
+	CSDL_Rect(Sint16 x, Sint16 y, Uint16 w, Uint16 h)
+	{
+		this->x = x; this->y = y;
+		this->w = w; this->h = h;
+	}
+};
+
+// Draw a single character.
+// Characters are on top of each other in the font image, in ASCII order,
+// so all this routine does is just set the coordinates for the character
+// and use SDL to blit out.
+
+const int kCharWidth = 14;
+const int kCharHeight = 24;
+void draw_char(char ch, int x, int y)
+{
+	CSDL_Rect src(0, (ch - 32) * kCharHeight, kCharWidth, kCharHeight), dst(x, y, kCharWidth, kCharHeight);
+	SDL_BlitSurface(g_font, &src, g_screen, &dst);
+}
+
+void draw_string(int x, int y, const char *fmt, ...)
+{
+	va_list arg;
+	va_start(arg, fmt);
+
+	const int len = _vscprintf(fmt, arg) + 1;
+	char* buf = (char*)_alloca(len);
+	vsprintf_s(buf, len, fmt, arg);
+
+	while (*buf) {
+		draw_char(*buf,x,y);
+		x += kCharWidth;
+		buf++;
+	}
+	va_end(arg);
 }
 
 int _tmain(int argc, _TCHAR* argv[])
 {
+
+	HDC dc = GetWindowDC(NULL);
+	ReleaseDC(NULL, dc);
+/*
+	lua_State *l;
+	if (!load_scene("scene1.lua", &l))
+		return 1;
+*/
 	SDL_Init(SDL_INIT_EVERYTHING);
 
 	const int width = GetSystemMetrics(SM_CXSCREEN) / 2;
 	const int height = GetSystemMetrics(SM_CYSCREEN) / 2;
 
-	SDL_Surface *screen = SDL_SetVideoMode(width, height, 32, SDL_DOUBLEBUF);
+	g_screen = SDL_SetVideoMode(width, height, 32, SDL_DOUBLEBUF);
+
+	Objects objects;
+
+	objects.push_back(new Sphere(Vec3(-10, 0, -200), 10));
+	objects.push_back(new Sphere(Vec3(+10, 5, -200), 10));
+	objects.push_back(new Sphere(Vec3(0, 0, -240), 10));
+
+	SDL_Surface *temp = SDL_LoadBMP("font14x24.bmp");
+	g_font = SDL_ConvertSurface(temp, g_screen->format, SDL_SWSURFACE);
+	SDL_FreeSurface(temp);
+	SDL_SetColorKey(g_font, SDL_SRCCOLORKEY, 0);
+
 
 	Camera c;
-	c._pos = Vec3(0,0,0);
+	c._pos = Vec3(0,0, 0);
 	c._up = Vec3(0,1,0);
+	c._dir = Vec3(0,0,-1);
 
 	bool done = false;
   bool first_time = true;
@@ -295,12 +375,13 @@ int _tmain(int argc, _TCHAR* argv[])
 				done = true;
 				break;
 
-			case SDL_KEYUP:
+			case SDL_KEYDOWN:
 				switch (event.key.keysym.sym) {
-				case SDLK_UP: c._pos.y -= 1; redraw = true; break;
-				case SDLK_DOWN: c._pos.y += 1; redraw = true; break;
+				case SDLK_UP: c._pos.y += 1; redraw = true; break;
+				case SDLK_DOWN: c._pos.y -= 1; redraw = true; break;
 				case SDLK_LEFT: c._pos.x -= 1; redraw = true; break;
 				case SDLK_RIGHT: c._pos.x += 1; redraw = true; break;
+				case SDLK_ESCAPE: done = true; break;
 				}
 				break;
 			}
@@ -308,7 +389,8 @@ int _tmain(int argc, _TCHAR* argv[])
 
     if (redraw || first_time) {
       first_time = false;
-      c._dir = normalize(Vec3(0,0,-200) - c._pos);
+      //c._dir = normalize(Vec3(0,0,-200) - c._pos);
+			//c._up = normalize(cross(Vec3(1,0,0), c._dir));
 
       // scale the view plane by the aspect ratio of the bitmap to get square pixels
       const float aspect = (float)width / height;
@@ -321,18 +403,28 @@ int _tmain(int argc, _TCHAR* argv[])
 
       c.create_frame();
 
-      SDL_LockSurface(screen);
-      render(c, screen->pixels, screen->w, screen->h);
-      SDL_UnlockSurface(screen);
-
-      SDL_Flip(screen);
-
+      SDL_LockSurface(g_screen);
+			DWORD start = timeGetTime();
+      render(c, objects, g_screen->pixels, g_screen->w, g_screen->h);
+			DWORD elapsed = timeGetTime() - start;
+      SDL_UnlockSurface(g_screen);
+			draw_string(0, 0, "time: %.3fs", elapsed / 1000.0f);
+			draw_string(0, kCharHeight, "cam pos: %.3f, %.3f, %.3f dir: %.3f, %.3f, %.3f", c._pos.x, c._pos.y, c._pos.z, c._dir.x, c._dir.y, c._dir.z);
+			draw_string(0, 2 * kCharHeight, "a: %.3f, %.3f, %.3f", c._a.x, c._a.y, c._a.z);
+			draw_string(0, 3 * kCharHeight, "b: %.3f, %.3f, %.3f", c._b.x, c._b.y, c._b.z);
+			draw_string(0, 4 * kCharHeight, "c: %.3f, %.3f, %.3f", c._c.x, c._c.y, c._c.z);
+      SDL_Flip(g_screen);
     }
 
 	}
+
+	for (int i = 0; i < (int)objects.size(); ++i)
+		delete objects[i];
+	objects.clear();
+
+	SDL_FreeSurface(g_font);
 
 	SDL_Quit();
 
 	return 0;
 }
-
