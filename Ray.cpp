@@ -255,21 +255,21 @@ struct BGRA32
 Object *find_intersection(const Objects& objects, const Vec3& o, const Vec3& d, float *t)
 {
 	int idx = -1;
-	float min_t = FLT_MAX;
+	float tmp, min_t = FLT_MAX;
 	for (int i = 0; i < (int)objects.size(); ++i) {
-		if (objects[i]->intersect(o, d, t) && *t < min_t) {
-			min_t = *t;
+		if (objects[i]->intersect(o, d, &tmp) && tmp < min_t) {
+			min_t = tmp;
 			idx = i;
 		}
 	}
-
+  *t = min_t;
 	return idx == -1 ? NULL : objects[idx];
 }
 
 void render(const Camera& c, const Objects& objects, void *ptr, int width, int height)
 {
 	Vec3 o, d;
-	Vec3 light_pos(0,100,-200);
+	Vec3 light_pos(0,100,-150);
 
 	BGRA32 *p = (BGRA32 *)ptr;
 	for (int y = 0; y < height; ++y) {
@@ -280,44 +280,27 @@ void render(const Camera& c, const Objects& objects, void *ptr, int width, int h
 
 			if (Object *obj = find_intersection(objects, o, d, &t)) {
 				Vec3 p0 = o + t * d;
-				Vec3 l = normalize(light_pos - p0);
-				Vec3 n = obj->calc_normal(p0);
-				Vec3 v = normalize(c._pos - p0);
-				Vec3 h = normalize(l + v);
-				float spec = powf(dot(n, h), 32);
-				float diffuse = dot(n, l);
-				float col = min(1, max(0, diffuse + spec));
-				//p->r = p->g = p->b = p->a = (uint8_t)(255 * max(0, dot(n, l)));
-				p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
+
+        Vec3 probe = (light_pos - p0);
+        const float light_dist = probe.len();
+        normalize(probe);
+        float tmp;
+        Object *occulder = find_intersection(objects, p0 + 0.1f * probe, probe, &tmp);
+        if (occulder && tmp > 0 && tmp < light_dist) {
+          p->r = p->g = p->b = p->a = 0;
+        } else {
+          Vec3 l = normalize(light_pos - p0);
+          Vec3 n = obj->calc_normal(p0);
+          Vec3 v = normalize(c._pos - p0);
+          Vec3 h = normalize(l + v);
+          float spec = powf(dot(n, h), 32);
+          float diffuse = dot(n, l);
+          float col = min(1, max(0, diffuse + spec));
+          p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
+        }
 			} else {
 				p->r = p->g = p->b = p->a = 0;
 			}
-
-
-			int idx = -1;
-			float min_t = FLT_MAX;
-			for (int i = 0; i < (int)objects.size(); ++i) {
-				if (objects[i]->intersect(o, d, &t) && t < min_t) {
-					min_t = t;
-					idx = i;
-				}
-			}
-
-			if (idx != -1) {
-				Vec3 p0 = o + min_t * d;
-				Vec3 l = normalize(light_pos - p0);
-				Vec3 n = objects[idx]->calc_normal(p0);
-				Vec3 v = normalize(c._pos - p0);
-				Vec3 h = normalize(l + v);
-				float spec = powf(dot(n, h), 32);
-				float diffuse = dot(n, l);
-				float col = min(1, max(0, diffuse + spec));
-				//p->r = p->g = p->b = p->a = (uint8_t)(255 * max(0, dot(n, l)));
-				p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
-			} else {
-				p->r = p->g = p->b = p->a = 0;
-			}
-
 			p++;
 		}
 	}
@@ -400,8 +383,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	objects.push_back(new Sphere(Vec3(-10, 0, -200), 10));
 	objects.push_back(new Sphere(Vec3(+10, 5, -200), 10));
 	objects.push_back(new Sphere(Vec3(0, 0, -240), 10));
-	objects.push_back(new Plane(Vec3(0, 0, 0), Vec3(0,1,0)));
-	objects.push_back(new Plane(Vec3(-10, 0, 0), Vec3(1,0,0)));
+	objects.push_back(new Plane(Vec3(0, -10, 0), Vec3(0,1,0)));
 
 	SDL_Surface *temp = SDL_LoadBMP("font14x24.bmp");
 	g_font = SDL_ConvertSurface(temp, g_screen->format, SDL_SWSURFACE);
@@ -442,7 +424,6 @@ int _tmain(int argc, _TCHAR* argv[])
     if (redraw || first_time) {
       first_time = false;
       c._dir = normalize(Vec3(0,0,-200) - c._pos);
-			//c._up = normalize(cross(Vec3(1,0,0), c._dir));
 
       // scale the view plane by the aspect ratio of the bitmap to get square pixels
       const float aspect = (float)width / height;
