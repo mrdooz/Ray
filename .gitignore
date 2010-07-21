@@ -10,7 +10,6 @@ ipch/
 *.suo
 *.vcproj.*
 *.exp
-*.bmp
 *.*~
 *.zip
 *.obj
