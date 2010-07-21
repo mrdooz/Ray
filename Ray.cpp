@@ -154,7 +154,7 @@ void Camera::create_frame()
 
 	_a = (_u1 - _u0) * _frame.u;
 	_b = (_v1 - _v0) * _frame.v;
-	_c = _u0 * _frame.u + _v0 * _frame.v + _dist * -_frame.w;
+	_c = _pos + _u0 * _frame.u + _v0 * _frame.v + _dist * -_frame.w;
 }
 
 void Camera::ray_to_world(const Vec3& s, Vec3 *o, Vec3 *d) const
@@ -183,7 +183,6 @@ typedef std::vector<Object *> Objects;
 
 struct Sphere : public Object
 {
-	Sphere() {};
 	Sphere(const Vec3& center, float radius) : c(center), r(radius) {}
 
 	virtual bool intersect(const Vec3& o, const Vec3& d, float *t) const;
@@ -219,6 +218,31 @@ Vec3 Sphere::calc_normal(const Vec3& p) const
 	return normalize(p - c);
 }
 
+struct Plane : public Object
+{
+	Plane(const Vec3& a, const Vec3& n) : a(a), n(n) {}
+	virtual bool intersect(const Vec3& o, const Vec3& d, float *t) const;
+	virtual Vec3 calc_normal(const Vec3& p) const;
+
+	Vec3 a, n;
+};
+
+bool Plane::intersect(const Vec3& o, const Vec3& d, float *t) const
+{
+	// plane eq: (p-a).n = 0
+	// p = o + t * d
+	// (o + t * d - a).n =0
+	// t = (a-o).n / d.n
+
+	*t = dot(a-o, n) / (dot(d, n));
+	return *t >= 0;
+}
+
+Vec3 Plane::calc_normal(const Vec3& p) const
+{
+	return n;
+}
+
 
 struct BGRA32
 {
@@ -228,27 +252,47 @@ struct BGRA32
 	uint8_t a;
 };
 
+Object *find_intersection(const Objects& objects, const Vec3& o, const Vec3& d, float *t)
+{
+	int idx = -1;
+	float min_t = FLT_MAX;
+	for (int i = 0; i < (int)objects.size(); ++i) {
+		if (objects[i]->intersect(o, d, t) && *t < min_t) {
+			min_t = *t;
+			idx = i;
+		}
+	}
+
+	return idx == -1 ? NULL : objects[idx];
+}
+
 void render(const Camera& c, const Objects& objects, void *ptr, int width, int height)
 {
 	Vec3 o, d;
 	Vec3 light_pos(0,100,-200);
 
-	Vec3 o0, d0;
-	Vec3 o1, d1;
-	Vec3 o2, d2;
-	Vec3 o3, d3;
-
-	c.ray_from_pixel(0, 0, width, height, &o0, &d0);
-	c.ray_from_pixel(width-1, 0, width, height, &o1, &d1);
-	c.ray_from_pixel(0, height-1, width, height, &o2, &d2);
-	c.ray_from_pixel(width-1, height-1, width, height, &o3, &d3);
-
-	float t;
 	BGRA32 *p = (BGRA32 *)ptr;
 	for (int y = 0; y < height; ++y) {
 		for (int x = 0; x < width; ++x) {
 
+			float t;
 			c.ray_from_pixel(x, y, width, height, &o, &d);
+
+			if (Object *obj = find_intersection(objects, o, d, &t)) {
+				Vec3 p0 = o + t * d;
+				Vec3 l = normalize(light_pos - p0);
+				Vec3 n = obj->calc_normal(p0);
+				Vec3 v = normalize(c._pos - p0);
+				Vec3 h = normalize(l + v);
+				float spec = powf(dot(n, h), 32);
+				float diffuse = dot(n, l);
+				float col = min(1, max(0, diffuse + spec));
+				//p->r = p->g = p->b = p->a = (uint8_t)(255 * max(0, dot(n, l)));
+				p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
+			} else {
+				p->r = p->g = p->b = p->a = 0;
+			}
+
 
 			int idx = -1;
 			float min_t = FLT_MAX;
@@ -263,7 +307,13 @@ void render(const Camera& c, const Objects& objects, void *ptr, int width, int h
 				Vec3 p0 = o + min_t * d;
 				Vec3 l = normalize(light_pos - p0);
 				Vec3 n = objects[idx]->calc_normal(p0);
-				p->r = p->g = p->b = p->a = (uint8_t)(255 * max(0, dot(n, l)));
+				Vec3 v = normalize(c._pos - p0);
+				Vec3 h = normalize(l + v);
+				float spec = powf(dot(n, h), 32);
+				float diffuse = dot(n, l);
+				float col = min(1, max(0, diffuse + spec));
+				//p->r = p->g = p->b = p->a = (uint8_t)(255 * max(0, dot(n, l)));
+				p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
 			} else {
 				p->r = p->g = p->b = p->a = 0;
 			}
@@ -350,6 +400,8 @@ int _tmain(int argc, _TCHAR* argv[])
 	objects.push_back(new Sphere(Vec3(-10, 0, -200), 10));
 	objects.push_back(new Sphere(Vec3(+10, 5, -200), 10));
 	objects.push_back(new Sphere(Vec3(0, 0, -240), 10));
+	objects.push_back(new Plane(Vec3(0, 0, 0), Vec3(0,1,0)));
+	objects.push_back(new Plane(Vec3(-10, 0, 0), Vec3(1,0,0)));
 
 	SDL_Surface *temp = SDL_LoadBMP("font14x24.bmp");
 	g_font = SDL_ConvertSurface(temp, g_screen->format, SDL_SWSURFACE);
@@ -389,7 +441,7 @@ int _tmain(int argc, _TCHAR* argv[])
 
     if (redraw || first_time) {
       first_time = false;
-      //c._dir = normalize(Vec3(0,0,-200) - c._pos);
+      c._dir = normalize(Vec3(0,0,-200) - c._pos);
 			//c._up = normalize(cross(Vec3(1,0,0), c._dir));
 
       // scale the view plane by the aspect ratio of the bitmap to get square pixels
