@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <vector>
 #include <assert.h>
+#include <concrt.h>
 
 extern "C"
 {
@@ -280,23 +281,82 @@ Vec3 get_normal(const Vec3& p)
 	return normalize(n);
 }
 
+using namespace Concurrency;
+
+// renders from start_y, h scanlines down
+struct RenderJobData
+{
+  RenderJobData(int start_y, int num_lines, int width, int height, void *ptr, const Camera *camera) 
+    : start_y(start_y), num_lines(num_lines), width(width), height(height), ptr(ptr), camera(camera) {}
+  int start_y;
+  int num_lines;
+  int width, height;
+  void *ptr;
+  const Camera *camera;
+  event signal;
+};
+
+
+void __cdecl RenderJob(LPVOID param)
+{
+  RenderJobData *data = (RenderJobData *)param;
+  data->signal.reset();
+
+  Vec3 o, d;
+  Vec3 light_pos(0,100,-150);
+
+  BGRA32 *p = (BGRA32 *)data->ptr + data->start_y * data->width;
+  for (int y = data->start_y; y < data->start_y + data->num_lines; ++y) {
+    for (int x = 0; x < data->width; ++x) {
+
+      data->camera->ray_from_pixel(x, y, data->width, data->height, &o, &d);
+
+      bool found = false;
+      float min_t = 0, max_t = 1000, dt = 5;
+      for (float t = min_t; t < max_t; t += dt) {
+        Vec3 p0 = o + t * d;
+        if (p0.y < fn(p0.x, p0.z)) {
+          Vec3 p0 = o + (t - 0.5f * dt) * d;
+          Vec3 l = normalize(light_pos - p0);
+          Vec3 n = get_normal(p0);
+          float diffuse = dot(n, l);
+          float col = min(1, max(0, diffuse));
+          p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
+          found = true;
+          break;
+        }
+      }
+      if (!found)
+        p->r = p->g = p->b = p->a = 0;
+
+      p++;
+    }
+  }
+
+  data->signal.set();
+}
+
+/*
 struct RenderJob
 {
-	int start_x, start_y;
-	int w, h;
+  RenderJob(int start_y, int num_lines, int width, int height, void *ptr, const Camera *camera) 
+    : start_y(start_y), num_lines(num_lines), width(width), height(height), ptr(ptr), camera(camera) {}
+	int start_y;
+  int num_lines;
+	int width, height;
 	void *ptr;
+  const Camera *camera;
 
 	void run()
 	{
-/*
 		Vec3 o, d;
 		Vec3 light_pos(0,100,-150);
 
-		BGRA32 *p = (BGRA32 *)ptr;
-		for (int y = 0; y < height; ++y) {
-			for (int x = start_x; x < width; ++x) {
+		BGRA32 *p = (BGRA32 *)ptr + start_y * width;
+		for (int y = start_y; y < start_y + num_lines; ++y) {
+			for (int x = 0; x < width; ++x) {
 
-				c.ray_from_pixel(x, y, width, height, &o, &d);
+				camera->ray_from_pixel(x, y, width, height, &o, &d);
 
 				bool found = false;
 				float min_t = 0, max_t = 1000, dt = 5;
@@ -319,10 +379,9 @@ struct RenderJob
 				p++;
 			}
 		}
-*/
 	}
 };
-
+*/
 void raycast(const Camera& c, const Objects& objects, void *ptr, int width, int height)
 {
 	Vec3 o, d;
@@ -488,6 +547,15 @@ int _tmain(int argc, _TCHAR* argv[])
 	c._up = Vec3(0,1,0);
 	c._dir = Vec3(0,0,-1);
 
+  std::vector<RenderJobData *> datas;
+  int ofs = 0;
+  int num_jobs = height / 2;
+  int lines = height / num_jobs;
+  while (ofs <= height) {
+    datas.push_back(new RenderJobData(ofs, min(height-ofs, lines), width, height, NULL, &c));
+    ofs += lines;
+  }
+
 	bool done = false;
   bool first_time = true;
 	while (!done) {
@@ -513,7 +581,7 @@ int _tmain(int argc, _TCHAR* argv[])
 			}
 		}
 
-    if (redraw || first_time) {
+    if (1 || redraw || first_time) {
       first_time = false;
       c._dir = normalize(Vec3(0,0,-200) - c._pos);
 
@@ -529,8 +597,20 @@ int _tmain(int argc, _TCHAR* argv[])
       c.create_frame();
 
       SDL_LockSurface(g_screen);
+
 			DWORD start = timeGetTime();
-      raycast(c, objects, g_screen->pixels, g_screen->w, g_screen->h);
+
+      int proc = CurrentScheduler::GetNumberOfVirtualProcessors();
+
+      for (int i = 0; i < (int)datas.size(); ++i) {
+        datas[i]->ptr = g_screen->pixels;
+        CurrentScheduler::ScheduleTask(RenderJob, datas[i]);
+      }
+
+      for (int i = 0; i < (int)datas.size(); ++i)
+        datas[i]->signal.wait();
+
+      //raycast(c, objects, g_screen->pixels, g_screen->w, g_screen->h);
 			DWORD elapsed = timeGetTime() - start;
       SDL_UnlockSurface(g_screen);
 			draw_string(0, 0, "time: %.3fs", elapsed / 1000.0f);
@@ -542,6 +622,10 @@ int _tmain(int argc, _TCHAR* argv[])
     }
 
 	}
+
+  for (int i = 0; i < (int)datas.size(); ++i)
+    delete datas[i];
+  datas.clear();
 
 	for (int i = 0; i < (int)objects.size(); ++i)
 		delete objects[i];
