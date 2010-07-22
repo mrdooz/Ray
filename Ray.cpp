@@ -266,7 +266,55 @@ Object *find_intersection(const Objects& objects, const Vec3& o, const Vec3& d, 
 	return idx == -1 ? NULL : objects[idx];
 }
 
-void render(const Camera& c, const Objects& objects, void *ptr, int width, int height)
+float fn(float x, float z)
+{
+	return sin(x) * sin(z);
+}
+
+Vec3 get_normal(const Vec3& p)
+{
+	const float eps = 0.01f;
+	const Vec3 n = Vec3( fn(p.x-eps,p.z) - fn(p.x+eps,p.z),
+		2.0f*eps,
+		fn(p.x,p.z-eps) - fn(p.x,p.z+eps) );
+	return normalize(n);
+}
+void raycast(const Camera& c, const Objects& objects, void *ptr, int width, int height)
+{
+	Vec3 o, d;
+	Vec3 light_pos(0,100,-150);
+
+	BGRA32 *p = (BGRA32 *)ptr;
+	for (int y = 0; y < height; ++y) {
+		for (int x = 0; x < width; ++x) {
+
+			c.ray_from_pixel(x, y, width, height, &o, &d);
+
+			bool found = false;
+			float min_t = 0, max_t = 1000, dt = 5;
+			for (float t = min_t; t < max_t; t += dt) {
+				Vec3 p0 = o + t * d;
+				if (p0.y < fn(p0.x, p0.z)) {
+					Vec3 p0 = o + (t - 0.5f * dt) * d;
+					Vec3 l = normalize(light_pos - p0);
+					Vec3 n = get_normal(p0);
+					float diffuse = dot(n, l);
+					float col = min(1, max(0, diffuse));
+					p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+				p->r = p->g = p->b = p->a = 0;
+
+			p++;
+		}
+	}
+
+}
+
+void raytrace(const Camera& c, const Objects& objects, void *ptr, int width, int height)
 {
 	Vec3 o, d;
 	Vec3 light_pos(0,100,-150);
@@ -438,7 +486,7 @@ int _tmain(int argc, _TCHAR* argv[])
 
       SDL_LockSurface(g_screen);
 			DWORD start = timeGetTime();
-      render(c, objects, g_screen->pixels, g_screen->w, g_screen->h);
+      raycast(c, objects, g_screen->pixels, g_screen->w, g_screen->h);
 			DWORD elapsed = timeGetTime() - start;
       SDL_UnlockSurface(g_screen);
 			draw_string(0, 0, "time: %.3fs", elapsed / 1000.0f);
