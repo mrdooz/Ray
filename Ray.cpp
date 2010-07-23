@@ -48,6 +48,64 @@ struct Vec3
 
 };
 
+struct Matrix3x3
+{
+	Matrix3x3() {}
+	Matrix3x3(float m11, float m12, float m13, float m21, float m22, float m23, float m31, float m32, float m33)
+		: m11(m11), m12(m12), m13(m13), m21(m21), m22(m22), m23(m23), m31(m31), m32(m32), m33(m33) {}
+
+	union {
+		struct {
+			float m11, m12, m13;
+			float m21, m22, m23;
+			float m31, m32, m33;
+		};
+		float d[3*3];
+	};
+};
+
+Vec3 operator*(const Vec3& v, const Matrix3x3& m)
+{
+	return Vec3(
+		v.x * m.m11 + v.y * m.m12 + v.z * m.m13,
+		v.x * m.m21 + v.y * m.m22 + v.z * m.m23,
+		v.x * m.m31 + v.y * m.m32 + v.z * m.m33
+		);
+}
+
+Matrix3x3 rotate_x(float q)
+{
+	const float sin_q = sinf(q);
+	const float cos_q = cosf(q);
+	return Matrix3x3(
+		1, 0, 0,
+		0, cos_q, sin_q,
+		0, -sin_q, cos_q
+		);
+}
+
+Matrix3x3 rotate_y(float q)
+{
+	const float sin_q = sinf(q);
+	const float cos_q = cosf(q);
+	return Matrix3x3(
+		cos_q, 0, -sin_q,
+		0, 1, 0,
+		sin_q, 0, cos_q
+		);
+}
+
+Matrix3x3 rotate_z(float q)
+{
+	const float sin_q = sinf(q);
+	const float cos_q = cosf(q);
+	return Matrix3x3(
+		cos_q, sin_q, 0,
+		-sin_q, cos_q, 0,
+		0, 0, 1
+		);
+}
+
 const float Vec3::kEps = 0.00001f;
 
 float Vec3::len() const
@@ -296,14 +354,92 @@ struct RenderJobData
   event signal;
 };
 
+// distance from unit sphere at (0,0,0)
+float sphere_distance(const Vec3& p)
+{
+	return p.len() - 1;
+}
+
+template<class T>
+T max3(const T& a, const T& b, const T& c)
+{
+	return max(a, max(b, c));
+}
+
+// unit cube at (0,0,0)
+float cube_distance(const Vec3& p)
+{
+	return max3(fabs(p.x), fabs(p.y), fabs(p.z)) - 1;
+}
+
+float inline deg_to_rad(const float deg)
+{
+	return 3.1415926f * deg / 180.0f;
+}
+
+float distance(const Vec3& p)
+{
+	Vec3 t = p * rotate_y(p.y);
+	return cube_distance(t);
+}
 
 void __cdecl RenderJob(LPVOID param)
+{
+	RenderJobData *data = (RenderJobData *)param;
+	data->signal.reset();
+
+	Vec3 o, d;
+	Vec3 light_pos(0,100,0);
+
+	const float kEps = 0.00001f;
+
+	BGRA32 *p = (BGRA32 *)data->ptr + data->start_y * data->width;
+	for (int y = data->start_y; y < data->start_y + data->num_lines; ++y) {
+		for (int x = 0; x < data->width; ++x) {
+
+			data->camera->ray_from_pixel(x, y, data->width, data->height, &o, &d);
+
+			// ray marching
+			bool found = false;
+			float min_t = 0, max_t = 100;
+			float t = min_t;
+			while (t < max_t) {
+				// find closest intersection
+				Vec3 p0 = o + t * d;
+				float closest = distance(p0);
+				if (closest <= kEps) {
+					Vec3 n = normalize(Vec3( 
+						distance(p0 + Vec3(kEps, 0, 0)) - distance(p0 - Vec3(kEps, 0, 0)),
+						distance(p0 + Vec3(0, kEps, 0)) - distance(p0 - Vec3(0, kEps, 0)),
+						distance(p0 + Vec3(0, 0, kEps)) - distance(p0 - Vec3(0, 0, kEps))));
+
+					Vec3 l = normalize(light_pos - p0);
+					float diffuse = dot(n, l);
+					float ambient = 0.2f;
+					float col = min(1, max(0, ambient + diffuse));
+					p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
+					found = true;
+					break;
+				}
+				t += closest;
+			}
+			if (!found)
+				p->r = p->g = p->b = p->a = 0;
+
+			p++;
+		}
+	}
+
+	data->signal.set();
+}
+
+void __cdecl RenderJob2(LPVOID param)
 {
   RenderJobData *data = (RenderJobData *)param;
   data->signal.reset();
 
   Vec3 o, d;
-  Vec3 light_pos(0,100,-150);
+  Vec3 light_pos(0,100,0);
 
   BGRA32 *p = (BGRA32 *)data->ptr + data->start_y * data->width;
   for (int y = data->start_y; y < data->start_y + data->num_lines; ++y) {
@@ -336,52 +472,6 @@ void __cdecl RenderJob(LPVOID param)
   data->signal.set();
 }
 
-/*
-struct RenderJob
-{
-  RenderJob(int start_y, int num_lines, int width, int height, void *ptr, const Camera *camera) 
-    : start_y(start_y), num_lines(num_lines), width(width), height(height), ptr(ptr), camera(camera) {}
-	int start_y;
-  int num_lines;
-	int width, height;
-	void *ptr;
-  const Camera *camera;
-
-	void run()
-	{
-		Vec3 o, d;
-		Vec3 light_pos(0,100,-150);
-
-		BGRA32 *p = (BGRA32 *)ptr + start_y * width;
-		for (int y = start_y; y < start_y + num_lines; ++y) {
-			for (int x = 0; x < width; ++x) {
-
-				camera->ray_from_pixel(x, y, width, height, &o, &d);
-
-				bool found = false;
-				float min_t = 0, max_t = 1000, dt = 5;
-				for (float t = min_t; t < max_t; t += dt) {
-					Vec3 p0 = o + t * d;
-					if (p0.y < fn(p0.x, p0.z)) {
-						Vec3 p0 = o + (t - 0.5f * dt) * d;
-						Vec3 l = normalize(light_pos - p0);
-						Vec3 n = get_normal(p0);
-						float diffuse = dot(n, l);
-						float col = min(1, max(0, diffuse));
-						p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
-						found = true;
-						break;
-					}
-				}
-				if (!found)
-					p->r = p->g = p->b = p->a = 0;
-
-				p++;
-			}
-		}
-	}
-};
-*/
 void raycast(const Camera& c, const Objects& objects, void *ptr, int width, int height)
 {
 	Vec3 o, d;
@@ -446,6 +536,7 @@ void raytrace(const Camera& c, const Objects& objects, void *ptr, int width, int
           Vec3 h = normalize(l + v);
           float spec = powf(dot(n, h), 32);
           float diffuse = dot(n, l);
+					float ambient = 0.2f;
           float col = min(1, max(0, diffuse + spec));
           p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
         }
@@ -543,16 +634,18 @@ int _tmain(int argc, _TCHAR* argv[])
 
 
 	Camera c;
-	c._pos = Vec3(0,0, 0);
+	c._pos = Vec3(0,0, 10);
 	c._up = Vec3(0,1,0);
 	c._dir = Vec3(0,0,-1);
 
   std::vector<RenderJobData *> datas;
+	std::vector<event *> events;
   int ofs = 0;
-  int num_jobs = height / 2;
+  int num_jobs = height / 4;
   int lines = height / num_jobs;
   while (ofs <= height) {
     datas.push_back(new RenderJobData(ofs, min(height-ofs, lines), width, height, NULL, &c));
+		events.push_back(&datas.back()->signal);
     ofs += lines;
   }
 
@@ -571,6 +664,8 @@ int _tmain(int argc, _TCHAR* argv[])
 
 			case SDL_KEYDOWN:
 				switch (event.key.keysym.sym) {
+				case SDLK_a: c._pos.z -= 1; redraw = true; break;
+				case SDLK_z: c._pos.z += 1; redraw = true; break;
 				case SDLK_UP: c._pos.y += 1; redraw = true; break;
 				case SDLK_DOWN: c._pos.y -= 1; redraw = true; break;
 				case SDLK_LEFT: c._pos.x -= 1; redraw = true; break;
@@ -581,9 +676,10 @@ int _tmain(int argc, _TCHAR* argv[])
 			}
 		}
 
-    if (1 || redraw || first_time) {
+    if (redraw || first_time) {
       first_time = false;
-      c._dir = normalize(Vec3(0,0,-200) - c._pos);
+			c._dir = normalize(Vec3(0,0,-200) - c._pos);
+			c._dir = normalize(Vec3(0,0,0) - c._pos);
 
       // scale the view plane by the aspect ratio of the bitmap to get square pixels
       const float aspect = (float)width / height;
@@ -607,8 +703,7 @@ int _tmain(int argc, _TCHAR* argv[])
         CurrentScheduler::ScheduleTask(RenderJob, datas[i]);
       }
 
-      for (int i = 0; i < (int)datas.size(); ++i)
-        datas[i]->signal.wait();
+			event::wait_for_multiple(&events[0], events.size(), true);
 
       //raycast(c, objects, g_screen->pixels, g_screen->w, g_screen->h);
 			DWORD elapsed = timeGetTime() - start;
