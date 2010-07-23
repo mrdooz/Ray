@@ -369,7 +369,7 @@ T max3(const T& a, const T& b, const T& c)
 // unit cube at (0,0,0)
 float cube_distance(const Vec3& p)
 {
-	return max3(fabs(p.x), fabs(p.y), fabs(p.z)) - 1;
+  return max3(fabs(p.x), fabs(p.y), fabs(p.z)) - 1;
 }
 
 float inline deg_to_rad(const float deg)
@@ -379,7 +379,7 @@ float inline deg_to_rad(const float deg)
 
 float distance(const Vec3& p)
 {
-	Vec3 t = p * rotate_y(p.y);
+  Vec3 t = p * rotate_y(p.y);
 	return cube_distance(t);
 }
 
@@ -401,13 +401,14 @@ void __cdecl RenderJob(LPVOID param)
 
 			// ray marching
 			bool found = false;
-			float min_t = 0, max_t = 100;
+			float min_t = 0.1f, max_t = 100;
 			float t = min_t;
 			while (t < max_t) {
 				// find closest intersection
 				Vec3 p0 = o + t * d;
 				float closest = distance(p0);
 				if (closest <= kEps) {
+          p0 = o + (t + closest) * d;
 					Vec3 n = normalize(Vec3( 
 						distance(p0 + Vec3(kEps, 0, 0)) - distance(p0 - Vec3(kEps, 0, 0)),
 						distance(p0 + Vec3(0, kEps, 0)) - distance(p0 - Vec3(0, kEps, 0)),
@@ -634,7 +635,7 @@ int _tmain(int argc, _TCHAR* argv[])
 
 
 	Camera c;
-	c._pos = Vec3(0,0, 10);
+	c._pos = Vec3(0,4, 15);
 	c._up = Vec3(0,1,0);
 	c._dir = Vec3(0,0,-1);
 
