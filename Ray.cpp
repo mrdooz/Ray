@@ -465,7 +465,7 @@ static float columna( float x, float y, float z, float mindist, float offx )
   const float di5 = distToBox( (x-y2)*0.7071f, (y2+x)*0.7071f, z,      0.10f*0.7071f, 0.10f*0.7071f, 0.12f );
   const float di6 = distToBox(              x, (y2+z)*0.7071f, (z-y2)*0.7071f, 0.12f, 0.10f*0.7071f, 0.1f*0.7071f );
   const float di7 = distToBox( (x-y3)*0.7071f, (y3+x)*0.7071f, z,      0.10f*0.7071f, 0.10f*0.7071f, 0.14f );
-  const float di8 = distToBox(              x, (y3+z)*0.7071f, (z-y3)*0.7071f, 0.14f, 0.10f*0.7071f, 0.10*0.7071f );
+  const float di8 = distToBox(              x, (y3+z)*0.7071f, (z-y3)*0.7071f, 0.14f, 0.10f*0.7071f, 0.10f*0.7071f );
 
   float di = di1;
   if( di2<di ) di=di2;
@@ -861,20 +861,7 @@ void raytrace(const Camera& c, const Objects& objects, void *ptr, int width, int
 
 }
 
-/*
-bool load_scene(const char *filename, lua_State **ll)
-{
-	lua_State *l = *ll = lua_open();
-	if (l == NULL)
-		return false;
-	luaL_openlibs(l);
 
-	if (luaL_loadfile(l,  filename))
-		return false;
-
-	return true;
-}
-*/
 
 struct CSDL_Rect : public SDL_Rect
 {
@@ -884,11 +871,6 @@ struct CSDL_Rect : public SDL_Rect
 		this->w = w; this->h = h;
 	}
 };
-
-// Draw a single character.
-// Characters are on top of each other in the font image, in ASCII order,
-// so all this routine does is just set the coordinates for the character
-// and use SDL to blit out.
 
 const int kCharWidth = 14;
 const int kCharHeight = 24;
@@ -915,83 +897,67 @@ void draw_string(int x, int y, const char *fmt, ...)
 	va_end(arg);
 }
 
-int _tmain(int argc, _TCHAR* argv[])
+int run_raycasting()
 {
+  SDL_Init(SDL_INIT_EVERYTHING);
 
-	HDC dc = GetWindowDC(NULL);
-	ReleaseDC(NULL, dc);
-/*
-	lua_State *l;
-	if (!load_scene("scene1.lua", &l))
-		return 1;
-*/
-	SDL_Init(SDL_INIT_EVERYTHING);
+  const int width = GetSystemMetrics(SM_CXSCREEN) / 2;
+  const int height = GetSystemMetrics(SM_CYSCREEN) / 2;
 
-	const int width = GetSystemMetrics(SM_CXSCREEN) / 2;
-	const int height = GetSystemMetrics(SM_CYSCREEN) / 2;
+  g_screen = SDL_SetVideoMode(width, height, 32, SDL_DOUBLEBUF);
 
-	g_screen = SDL_SetVideoMode(width, height, 32, SDL_DOUBLEBUF);
+  SDL_Surface *temp = SDL_LoadBMP("font14x24.bmp");
+  g_font = SDL_ConvertSurface(temp, g_screen->format, SDL_SWSURFACE);
+  SDL_FreeSurface(temp);
+  SDL_SetColorKey(g_font, SDL_SRCCOLORKEY, 0);
 
-	Objects objects;
-
-	objects.push_back(new Sphere(Vec3(-10, 0, -200), 10));
-	objects.push_back(new Sphere(Vec3(+10, 5, -200), 10));
-	objects.push_back(new Sphere(Vec3(0, 0, -240), 10));
-	objects.push_back(new Plane(Vec3(0, -10, 0), Vec3(0,1,0)));
-
-	SDL_Surface *temp = SDL_LoadBMP("font14x24.bmp");
-	g_font = SDL_ConvertSurface(temp, g_screen->format, SDL_SWSURFACE);
-	SDL_FreeSurface(temp);
-	SDL_SetColorKey(g_font, SDL_SRCCOLORKEY, 0);
-
-
-	Camera c;
-	c._pos = Vec3(0,4, 15);
-	c._up = Vec3(0,1,0);
-	c._dir = Vec3(0,0,-1);
+  Camera c;
+  c._pos = Vec3(0,4, 15);
+  c._up = Vec3(0,1,0);
+  c._dir = Vec3(0,0,-1);
 
   std::vector<RenderJobData *> datas;
-	std::vector<event *> events;
+  std::vector<event *> events;
   int ofs = 0;
   int num_jobs = height / 4;
   int lines = height / num_jobs;
   while (ofs <= height) {
     datas.push_back(new RenderJobData(ofs, min(height-ofs, lines), width, height, NULL, &c));
-		events.push_back(&datas.back()->signal);
+    events.push_back(&datas.back()->signal);
     ofs += lines;
   }
 
-	bool done = false;
+  bool done = false;
   bool first_time = true;
-	while (!done) {
+  while (!done) {
 
-		SDL_Event event;
+    SDL_Event event;
     bool redraw = false;
-		if (SDL_PollEvent(&event)) {
-			switch(event.type) {
-			
-			case SDL_QUIT:
-				done = true;
-				break;
+    if (SDL_PollEvent(&event)) {
+      switch(event.type) {
 
-			case SDL_KEYDOWN:
-				switch (event.key.keysym.sym) {
-				case SDLK_a: c._pos.z -= 1; redraw = true; break;
-				case SDLK_z: c._pos.z += 1; redraw = true; break;
-				case SDLK_UP: c._pos.y += 1; redraw = true; break;
-				case SDLK_DOWN: c._pos.y -= 1; redraw = true; break;
-				case SDLK_LEFT: c._pos.x -= 1; redraw = true; break;
-				case SDLK_RIGHT: c._pos.x += 1; redraw = true; break;
-				case SDLK_ESCAPE: done = true; break;
-				}
-				break;
-			}
-		}
+      case SDL_QUIT:
+        done = true;
+        break;
+
+      case SDL_KEYDOWN:
+        switch (event.key.keysym.sym) {
+        case SDLK_a: c._pos.z -= 1; redraw = true; break;
+        case SDLK_z: c._pos.z += 1; redraw = true; break;
+        case SDLK_UP: c._pos.y += 1; redraw = true; break;
+        case SDLK_DOWN: c._pos.y -= 1; redraw = true; break;
+        case SDLK_LEFT: c._pos.x -= 1; redraw = true; break;
+        case SDLK_RIGHT: c._pos.x += 1; redraw = true; break;
+        case SDLK_ESCAPE: done = true; break;
+        }
+        break;
+      }
+    }
 
     if (redraw || first_time) {
       first_time = false;
-			c._dir = normalize(Vec3(0,0,-200) - c._pos);
-			c._dir = normalize(Vec3(0,0,0) - c._pos);
+      c._dir = normalize(Vec3(0,0,-200) - c._pos);
+      c._dir = normalize(Vec3(0,0,0) - c._pos);
 
       // scale the view plane by the aspect ratio of the bitmap to get square pixels
       const float aspect = (float)width / height;
@@ -1006,41 +972,150 @@ int _tmain(int argc, _TCHAR* argv[])
 
       SDL_LockSurface(g_screen);
 
-			DWORD start = timeGetTime();
-
-      int proc = CurrentScheduler::GetNumberOfVirtualProcessors();
+      DWORD start = timeGetTime();
 
       for (int i = 0; i < (int)datas.size(); ++i) {
         datas[i]->ptr = g_screen->pixels;
         CurrentScheduler::ScheduleTask(RenderJob, datas[i]);
       }
 
-			event::wait_for_multiple(&events[0], events.size(), true);
+      event::wait_for_multiple(&events[0], events.size(), true);
 
       //raycast(c, objects, g_screen->pixels, g_screen->w, g_screen->h);
-			DWORD elapsed = timeGetTime() - start;
+      DWORD elapsed = timeGetTime() - start;
       SDL_UnlockSurface(g_screen);
-			draw_string(0, 0, "time: %.3fs", elapsed / 1000.0f);
-			draw_string(0, kCharHeight, "cam pos: %.3f, %.3f, %.3f dir: %.3f, %.3f, %.3f", c._pos.x, c._pos.y, c._pos.z, c._dir.x, c._dir.y, c._dir.z);
-			draw_string(0, 2 * kCharHeight, "a: %.3f, %.3f, %.3f", c._a.x, c._a.y, c._a.z);
-			draw_string(0, 3 * kCharHeight, "b: %.3f, %.3f, %.3f", c._b.x, c._b.y, c._b.z);
-			draw_string(0, 4 * kCharHeight, "c: %.3f, %.3f, %.3f", c._c.x, c._c.y, c._c.z);
+      draw_string(0, 0, "time: %.3fs", elapsed / 1000.0f);
+      draw_string(0, kCharHeight, "cam pos: %.3f, %.3f, %.3f dir: %.3f, %.3f, %.3f", c._pos.x, c._pos.y, c._pos.z, c._dir.x, c._dir.y, c._dir.z);
+      draw_string(0, 2 * kCharHeight, "a: %.3f, %.3f, %.3f", c._a.x, c._a.y, c._a.z);
+      draw_string(0, 3 * kCharHeight, "b: %.3f, %.3f, %.3f", c._b.x, c._b.y, c._b.z);
+      draw_string(0, 4 * kCharHeight, "c: %.3f, %.3f, %.3f", c._c.x, c._c.y, c._c.z);
       SDL_Flip(g_screen);
     }
 
-	}
+  }
 
   for (int i = 0; i < (int)datas.size(); ++i)
     delete datas[i];
   datas.clear();
 
-	for (int i = 0; i < (int)objects.size(); ++i)
-		delete objects[i];
-	objects.clear();
+  SDL_FreeSurface(g_font);
+  SDL_Quit();
+  return 0;
+}
 
-	SDL_FreeSurface(g_font);
+bool load_scene(const char *filename, lua_State **ll)
+{
+  lua_State *l = *ll = lua_open();
+  if (l == NULL)
+    return false;
+  luaL_openlibs(l);
 
-	SDL_Quit();
+  if (luaL_loadfile(l,  filename))
+    return false;
 
-	return 0;
+  return true;
+}
+
+int run_raytracing()
+{
+  lua_State *l;
+  if (!load_scene("scene1.lua", &l))
+    return 1;
+
+  SDL_Init(SDL_INIT_EVERYTHING);
+
+  const int width = GetSystemMetrics(SM_CXSCREEN) / 2;
+  const int height = GetSystemMetrics(SM_CYSCREEN) / 2;
+
+  g_screen = SDL_SetVideoMode(width, height, 32, SDL_DOUBLEBUF);
+
+  Objects objects;
+
+  objects.push_back(new Sphere(Vec3(-10, 0, -200), 10));
+  objects.push_back(new Sphere(Vec3(+10, 5, -200), 10));
+  objects.push_back(new Sphere(Vec3(0, 0, -240), 10));
+  objects.push_back(new Plane(Vec3(0, -10, 0), Vec3(0,1,0)));
+
+  SDL_Surface *temp = SDL_LoadBMP("font14x24.bmp");
+  g_font = SDL_ConvertSurface(temp, g_screen->format, SDL_SWSURFACE);
+  SDL_FreeSurface(temp);
+  SDL_SetColorKey(g_font, SDL_SRCCOLORKEY, 0);
+
+
+  Camera c;
+  c._pos = Vec3(0,4, 15);
+  c._up = Vec3(0,1,0);
+  c._dir = Vec3(0,0,-1);
+
+  bool done = false;
+  bool first_time = true;
+  while (!done) {
+
+    SDL_Event event;
+    bool redraw = false;
+    if (SDL_PollEvent(&event)) {
+      switch(event.type) {
+
+      case SDL_QUIT:
+        done = true;
+        break;
+
+      case SDL_KEYDOWN:
+        switch (event.key.keysym.sym) {
+        case SDLK_a: c._pos.z -= 1; redraw = true; break;
+        case SDLK_z: c._pos.z += 1; redraw = true; break;
+        case SDLK_UP: c._pos.y += 1; redraw = true; break;
+        case SDLK_DOWN: c._pos.y -= 1; redraw = true; break;
+        case SDLK_LEFT: c._pos.x -= 1; redraw = true; break;
+        case SDLK_RIGHT: c._pos.x += 1; redraw = true; break;
+        case SDLK_ESCAPE: done = true; break;
+        }
+        break;
+      }
+    }
+
+    if (redraw || first_time) {
+      first_time = false;
+      c._dir = normalize(Vec3(0,0,-200) - c._pos);
+
+      // scale the view plane by the aspect ratio of the bitmap to get square pixels
+      const float aspect = (float)width / height;
+      const float size = 10;
+      c._u0 = -aspect * size;
+      c._u1 = +aspect * size;
+      c._v0 = -size;
+      c._v1 = +size;
+      c._dist = 100;
+
+      c.create_frame();
+
+      SDL_LockSurface(g_screen);
+      DWORD start = timeGetTime();
+      raytrace(c, objects, g_screen->pixels, g_screen->w, g_screen->h);
+      DWORD elapsed = timeGetTime() - start;
+      SDL_UnlockSurface(g_screen);
+      draw_string(0, 0, "time: %.3fs", elapsed / 1000.0f);
+      draw_string(0, kCharHeight, "cam pos: %.3f, %.3f, %.3f dir: %.3f, %.3f, %.3f", c._pos.x, c._pos.y, c._pos.z, c._dir.x, c._dir.y, c._dir.z);
+      draw_string(0, 2 * kCharHeight, "a: %.3f, %.3f, %.3f", c._a.x, c._a.y, c._a.z);
+      draw_string(0, 3 * kCharHeight, "b: %.3f, %.3f, %.3f", c._b.x, c._b.y, c._b.z);
+      draw_string(0, 4 * kCharHeight, "c: %.3f, %.3f, %.3f", c._c.x, c._c.y, c._c.z);
+      SDL_Flip(g_screen);
+    }
+  }
+
+  for (int i = 0; i < (int)objects.size(); ++i)
+    delete objects[i];
+  objects.clear();
+
+  SDL_FreeSurface(g_font);
+
+  SDL_Quit();
+
+  return 0;
+}
+
+
+int _tmain(int argc, _TCHAR* argv[])
+{
+  return run_raytracing();
 }
