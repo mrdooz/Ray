@@ -35,15 +35,15 @@ Vec3 get_normal(const Vec3& p)
 using namespace Concurrency;
 
 // renders from start_y, h scanlines down
-struct RenderJobData
+struct RayMarcher::RenderJobData
 {
-  RenderJobData(int start_y, int num_lines, int width, int height, void *ptr, const Camera *camera) 
-    : start_y(start_y), num_lines(num_lines), width(width), height(height), ptr(ptr), camera(camera) {}
+  RenderJobData(int start_y, int num_lines, int width, int height, const Camera *camera) 
+    : start_y(start_y), num_lines(num_lines), width(width), height(height), camera(camera), ptr(nullptr) {}
   int start_y;
   int num_lines;
   int width, height;
-  void *ptr;
   const Camera *camera;
+  void *ptr;
   event signal;
 };
 
@@ -384,9 +384,9 @@ float distance(const Vec3& p)
 	return cube_distance(t);
 }
 
-void __cdecl RenderJob(LPVOID param)
+static void __cdecl RenderJob(LPVOID param)
 {
-	RenderJobData *data = (RenderJobData *)param;
+	RayMarcher::RenderJobData *data = (RayMarcher::RenderJobData *)param;
 	data->signal.reset();
 
 	Vec3 o, d;
@@ -438,9 +438,9 @@ void __cdecl RenderJob(LPVOID param)
 	data->signal.set();
 }
 
-void __cdecl RenderJob2(LPVOID param)
+static void __cdecl RenderJob2(LPVOID param)
 {
-  RenderJobData *data = (RenderJobData *)param;
+  RayMarcher::RenderJobData *data = (RayMarcher::RenderJobData *)param;
   data->signal.reset();
 
   Vec3 o, d;
@@ -519,7 +519,7 @@ bool RayMarcher::init(int width, int height)
 	int num_jobs = height / 4;
 	int lines = height / num_jobs;
 	while (ofs <= height) {
-		datas.push_back(new RenderJobData(ofs, min(height-ofs, lines), width, height, NULL, NULL));
+		datas.push_back(new RayMarcher::RenderJobData(ofs, min(height-ofs, lines), width, height, &_camera));
 		events.push_back(&datas.back()->signal);
 		ofs += lines;
 	}
@@ -535,7 +535,6 @@ void RayMarcher::render(const Camera& c, void *ptr, int width, int height)
 	}
 
 	event::wait_for_multiple(&events[0], events.size(), true);
-
 }
 
 void RayMarcher::close()
@@ -543,6 +542,5 @@ void RayMarcher::close()
 	for (int i = 0; i < (int)datas.size(); ++i)
 		delete datas[i];
 	datas.clear();
-
 }
 

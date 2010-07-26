@@ -76,15 +76,15 @@ int _tmain(int argc, _TCHAR* argv[])
 	g_font = SDL_ConvertSurface(temp, g_screen->format, SDL_SWSURFACE);
 	SDL_FreeSurface(temp);
 	SDL_SetColorKey(g_font, SDL_SRCCOLORKEY, 0);
+  SDL_EnableKeyRepeat(500, 50);
 
 	RayBase *ray = new RayTracer();
 	if (!ray->init(width, height))
 		return 1;
 
-	Camera c;
-	c._pos = Vec3(0,4, 15);
-	c._up = Vec3(0,1,0);
-	c._dir = Vec3(0,0,-1);
+	ray->_camera._pos = Vec3(0,4, 15);
+	ray->_camera._up = Vec3(0,1,0);
+	ray->_camera._dir = Vec3(0,0,-1);
 
 	bool done = false;
 	bool first_time = true;
@@ -101,12 +101,12 @@ int _tmain(int argc, _TCHAR* argv[])
 
 			case SDL_KEYDOWN:
 				switch (event.key.keysym.sym) {
-				case SDLK_a: c._pos.z -= 1; redraw = true; break;
-				case SDLK_z: c._pos.z += 1; redraw = true; break;
-				case SDLK_UP: c._pos.y += 1; redraw = true; break;
-				case SDLK_DOWN: c._pos.y -= 1; redraw = true; break;
-				case SDLK_LEFT: c._pos.x -= 1; redraw = true; break;
-				case SDLK_RIGHT: c._pos.x += 1; redraw = true; break;
+				case SDLK_a: ray->_camera._pos.z -= 1; redraw = true; break;
+				case SDLK_z: ray->_camera._pos.z += 1; redraw = true; break;
+				case SDLK_UP: ray->_camera._pos.y += 1; redraw = true; break;
+				case SDLK_DOWN: ray->_camera._pos.y -= 1; redraw = true; break;
+				case SDLK_LEFT: ray->_camera._pos.x -= 1; redraw = true; break;
+				case SDLK_RIGHT: ray->_camera._pos.x += 1; redraw = true; break;
 				case SDLK_ESCAPE: done = true; break;
 				}
 				break;
@@ -115,29 +115,29 @@ int _tmain(int argc, _TCHAR* argv[])
 
 		if (redraw || first_time) {
 			first_time = false;
-			c._dir = normalize(Vec3(0,0,-200) - c._pos);
+			ray->_camera._dir = normalize(Vec3(0,0,-200) - ray->_camera._pos);
 
 			// scale the view plane by the aspect ratio of the bitmap to get square pixels
 			const float aspect = (float)width / height;
 			const float size = 10;
-			c._u0 = -aspect * size;
-			c._u1 = +aspect * size;
-			c._v0 = -size;
-			c._v1 = +size;
-			c._dist = 100;
+			ray->_camera._u0 = -aspect * size;
+			ray->_camera._u1 = +aspect * size;
+			ray->_camera._v0 = -size;
+			ray->_camera._v1 = +size;
+			ray->_camera._dist = 100;
 
-			c.create_frame();
+			ray->_camera.create_frame();
 
 			SDL_LockSurface(g_screen);
 			DWORD start = timeGetTime();
-			ray->render(c, g_screen->pixels, g_screen->w, g_screen->h);
+			ray->render(g_screen->pixels, g_screen->w, g_screen->h);
 			DWORD elapsed = timeGetTime() - start;
 			SDL_UnlockSurface(g_screen);
 			draw_string(0, 0, "time: %.3fs", elapsed / 1000.0f);
-			draw_string(0, kCharHeight, "cam pos: %.3f, %.3f, %.3f dir: %.3f, %.3f, %.3f", c._pos.x, c._pos.y, c._pos.z, c._dir.x, c._dir.y, c._dir.z);
-			draw_string(0, 2 * kCharHeight, "a: %.3f, %.3f, %.3f", c._a.x, c._a.y, c._a.z);
-			draw_string(0, 3 * kCharHeight, "b: %.3f, %.3f, %.3f", c._b.x, c._b.y, c._b.z);
-			draw_string(0, 4 * kCharHeight, "c: %.3f, %.3f, %.3f", c._c.x, c._c.y, c._c.z);
+			draw_string(0, kCharHeight, "cam pos: %.3f, %.3f, %.3f dir: %.3f, %.3f, %.3f", ray->_camera._pos.x, ray->_camera._pos.y, ray->_camera._pos.z, ray->_camera._dir.x, ray->_camera._dir.y, ray->_camera._dir.z);
+			draw_string(0, 2 * kCharHeight, "a: %.3f, %.3f, %.3f", ray->_camera._a.x, ray->_camera._a.y, ray->_camera._a.z);
+			draw_string(0, 3 * kCharHeight, "b: %.3f, %.3f, %.3f", ray->_camera._b.x, ray->_camera._b.y, ray->_camera._b.z);
+			draw_string(0, 4 * kCharHeight, "c: %.3f, %.3f, %.3f", ray->_camera._c.x, ray->_camera._c.y, ray->_camera._c.z);
 			SDL_Flip(g_screen);
 		}
 	}

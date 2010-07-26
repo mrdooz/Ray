@@ -1,7 +1,6 @@
 #pragma once
 #include "ray.hpp"
 
-struct RenderJobData;
 
 namespace Concurrency
 {
@@ -14,7 +13,8 @@ struct RayMarcher : public RayBase
 	virtual void render(const Camera& c, void *ptr, int width, int height);
 	virtual void close();
 
+  struct RenderJobData;
+
 	std::vector<RenderJobData *> datas;
 	std::vector<Concurrency::event *> events;
-
 };

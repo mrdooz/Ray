@@ -114,15 +114,16 @@ Object *find_intersection(const Objects& objects, const Vec3& o, const Vec3& d, 
 using namespace Concurrency;
 
 // renders from start_y, h scanlines down
-struct RenderJobData
+struct RayTracer::RenderJobData
 {
-  RenderJobData(int start_y, int num_lines, int width, int height, void *ptr, const Camera *camera) 
-    : start_y(start_y), num_lines(num_lines), width(width), height(height), ptr(ptr), camera(camera) {}
+  RenderJobData(int start_y, int num_lines, int width, int height, const Camera *camera, const Objects *objects) 
+    : start_y(start_y), num_lines(num_lines), width(width), height(height), camera(camera), objects(objects), ptr(nullptr) {}
   int start_y;
   int num_lines;
   int width, height;
-  void *ptr;
   const Camera *camera;
+  const Objects *objects;
+  void *ptr;
   event signal;
 };
 
@@ -150,6 +151,15 @@ bool RayTracer::init(int width, int height)
 	objects.push_back(new Sphere(Vec3(0, 0, -240), 10));
 	objects.push_back(new Plane(Vec3(0, -10, 0), Vec3(0,1,0)));
 
+  int ofs = 0;
+  int num_jobs = height / 4;
+  int lines = height / num_jobs;
+  while (ofs <= height) {
+    datas.push_back(new RenderJobData(ofs, min(height-ofs, lines), width, height, &_camera, &objects));
+    events.push_back(&datas.back()->signal);
+    ofs += lines;
+  }
+
 	return true;
 }
 
@@ -158,10 +168,72 @@ void RayTracer::close()
 	for (int i = 0; i < (int)objects.size(); ++i)
 		delete objects[i];
 	objects.clear();
+
+  for (int i = 0; i < (int)datas.size(); ++i)
+    delete datas[i];
+  datas.clear();
 }
 
-void RayTracer::render(const Camera& c, void *ptr, int width, int height)
+static void __cdecl RenderJob(LPVOID param)
 {
+  RayTracer::RenderJobData *data = (RayTracer::RenderJobData *)param;
+  data->signal.reset();
+
+  Vec3 o, d;
+  Vec3 light_pos(0,100,-150);
+
+  const float kEps = 0.001f;
+
+  BGRA32 *p = (BGRA32 *)data->ptr + data->start_y * data->width;
+  for (int y = data->start_y; y < data->start_y + data->num_lines; ++y) {
+    for (int x = 0; x < data->width; ++x) {
+
+      float t;
+      data->camera->ray_from_pixel(x, y, data->width, data->height, &o, &d);
+
+      if (Object *obj = find_intersection(*data->objects, o, d, &t)) {
+        Vec3 p0 = o + t * d;
+
+        Vec3 probe = (light_pos - p0);
+        const float light_dist = probe.len();
+        normalize(probe);
+        float tmp;
+        Object *occulder = find_intersection(*data->objects, p0 + 0.1f * probe, probe, &tmp);
+        if (occulder && tmp > 0 && tmp < light_dist) {
+          p->r = p->g = p->b = p->a = 0;
+        } else {
+          Vec3 l = normalize(light_pos - p0);
+          Vec3 n = obj->calc_normal(p0);
+          Vec3 v = normalize(data->camera->_pos - p0);
+          Vec3 h = normalize(l + v);
+          float spec = powf(dot(n, h), 32);
+          float diffuse = dot(n, l);
+          float ambient = 0.2f;
+          float col = min(1, max(0, diffuse + spec));
+          p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
+        }
+      } else {
+        p->r = p->g = p->b = p->a = 0;
+      }
+      p++;
+    }
+  }
+
+  data->signal.set();
+}
+
+
+void RayTracer::render(void *ptr, int width, int height)
+{
+
+  for (int i = 0; i < (int)datas.size(); ++i) {
+    datas[i]->ptr = ptr;
+    CurrentScheduler::ScheduleTask(RenderJob, datas[i]);
+  }
+
+  event::wait_for_multiple(&events[0], events.size(), true);
+
+/*
 	Vec3 o, d;
 	Vec3 light_pos(0,100,-150);
 
@@ -170,7 +242,7 @@ void RayTracer::render(const Camera& c, void *ptr, int width, int height)
 		for (int x = 0; x < width; ++x) {
 
 			float t;
-			c.ray_from_pixel(x, y, width, height, &o, &d);
+			_camera.ray_from_pixel(x, y, width, height, &o, &d);
 
 			if (Object *obj = find_intersection(objects, o, d, &t)) {
 				Vec3 p0 = o + t * d;
@@ -185,7 +257,7 @@ void RayTracer::render(const Camera& c, void *ptr, int width, int height)
 				} else {
 					Vec3 l = normalize(light_pos - p0);
 					Vec3 n = obj->calc_normal(p0);
-					Vec3 v = normalize(c._pos - p0);
+					Vec3 v = normalize(_camera._pos - p0);
 					Vec3 h = normalize(l + v);
 					float spec = powf(dot(n, h), 32);
 					float diffuse = dot(n, l);
@@ -199,4 +271,5 @@ void RayTracer::render(const Camera& c, void *ptr, int width, int height)
 			p++;
 		}
 	}
+  */
 }
