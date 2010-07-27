@@ -10,14 +10,6 @@
 #include "camera.hpp"
 
 
-struct BGRA32
-{
-	uint8_t b;
-	uint8_t g;
-	uint8_t r;
-	uint8_t a;
-};
-
 float fn(float x, float z)
 {
 	return sin(x) * sin(z);
@@ -519,8 +511,8 @@ bool RayMarcher::init(int width, int height)
 	int num_jobs = height / 4;
 	int lines = height / num_jobs;
 	while (ofs <= height) {
-		datas.push_back(new RayMarcher::RenderJobData(ofs, min(height-ofs, lines), width, height, &_camera));
-		events.push_back(&datas.back()->signal);
+		_datas.push_back(new RayMarcher::RenderJobData(ofs, min(height-ofs, lines), width, height, &_camera));
+		_events.push_back(&_datas.back()->signal);
 		ofs += lines;
 	}
 
@@ -529,18 +521,18 @@ bool RayMarcher::init(int width, int height)
 
 void RayMarcher::render(const Camera& c, void *ptr, int width, int height)
 {
-	for (int i = 0; i < (int)datas.size(); ++i) {
-		datas[i]->ptr = ptr;
-		CurrentScheduler::ScheduleTask(RenderJob, datas[i]);
+	for (int i = 0; i < (int)_datas.size(); ++i) {
+		_datas[i]->ptr = ptr;
+		CurrentScheduler::ScheduleTask(RenderJob, _datas[i]);
 	}
 
-	event::wait_for_multiple(&events[0], events.size(), true);
+	event::wait_for_multiple(&_events[0], _events.size(), true);
 }
 
 void RayMarcher::close()
 {
-	for (int i = 0; i < (int)datas.size(); ++i)
-		delete datas[i];
-	datas.clear();
+	for (int i = 0; i < (int)_datas.size(); ++i)
+		delete _datas[i];
+	_datas.clear();
 }
 

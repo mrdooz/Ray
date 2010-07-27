@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <cassert>
 
 // we use a right-handed coordinate system (yes, this is going to confuse the hell out of me :)
 
@@ -20,6 +21,9 @@ struct Vec3
 		};
 		float d[3];
 	};
+
+  float operator[](int idx) const { assert(idx >= 0 && idx < 3); return d[idx];}
+  float& operator[](int idx) { assert(idx >= 0 && idx < 3); return d[idx];}
 
 	inline float len() const;
 

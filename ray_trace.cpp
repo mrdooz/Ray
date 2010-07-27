@@ -11,6 +11,11 @@
 #include "camera.hpp"
 #include "ray_math.hpp"
 #include "ray_trace.hpp"
+#include <celsus/string_utils.hpp>
+#include <celsus/path_utils.hpp>
+#include <celsus/Logger.hpp>
+#include <celsus/file_watcher.hpp>
+#include <celsus/fast_delegate.hpp>
 
 extern "C"
 {
@@ -89,13 +94,6 @@ Vec3 Plane::calc_normal(const Vec3& p) const
 }
 
 
-struct BGRA32
-{
-	uint8_t b;
-	uint8_t g;
-	uint8_t r;
-	uint8_t a;
-};
 
 Object *find_intersection(const Objects& objects, const Vec3& o, const Vec3& d, float *t)
 {
@@ -127,36 +125,174 @@ struct RayTracer::RenderJobData
   event signal;
 };
 
-bool load_scene(const char *filename, lua_State **ll)
+struct LuaTable
 {
-	lua_State *l = *ll = lua_open();
-	if (l == NULL)
-		return false;
-	luaL_openlibs(l);
+  LuaTable(lua_State *state, const char *name);
+  ~LuaTable();
+  int get_int_field(const char *key);
+  float get_float_field(const char *key);
+  bool get_float_array(const char *key, float *arr, int count);
 
-	if (luaL_loadfile(l,  filename))
-		return false;
+  bool iterate(std::function<bool ()> fn);
 
+  string2 _name;
+  lua_State * _state;
+};
+
+LuaTable::LuaTable(lua_State *state, const char *name)
+  : _state(state)
+  , _name(name)
+{
+  lua_getglobal(_state, _name);
+}
+
+LuaTable::~LuaTable()
+{
+  lua_pop(_state, 1);
+}
+
+bool LuaTable::iterate(std::function<bool ()> fn)
+{
+  // iterate over all the elements in a table, and for each element, call fn
+
+  int i = 1;
+  for (;;) {
+    lua_pushinteger(_state, i + 1); // push index (key)
+    lua_gettable(_state, -2);
+    if (!lua_isnumber(_state, -1) || !lua_istable(_state, -1)) {
+      break;
+    }
+    if (!fn())
+      return false;
+  }
+  return true;
+}
+
+int LuaTable::get_int_field(const char *key)
+{
+  SCOPED_OBJ([this](){lua_pop(_state, 1); });	// pop the value off the stack
+  // assumes the table with the field is pushed on the stack
+  lua_pushstring(_state, key);
+  lua_gettable(_state, -2);	// pop key, and push value on stack. the table is at -2
+  if (!lua_isnumber(_state, -1)) {
+    LOG_WARNING_LN("Error reading value for key: %s", key);
+    throw std::runtime_error(__FUNCTION__);
+  }
+  return (int)((int64_t)lua_tonumber(_state, -1));
+}
+
+bool LuaTable::get_float_array(const char *key, float *arr, int count)
+{
+  SCOPED_OBJ([this](){lua_pop(_state, 1); });	// pop the value off the stack
+  // assumes the table with the field is pushed on the stack
+  lua_pushstring(_state, key);
+  lua_gettable(_state, -2);	// pop key, and push value on stack
+  if (!lua_istable(_state, -1)) {
+    LOG_WARNING_LN("Error reading value for key: %s", key);
+    return false;
+  }
+
+  for (int i = 0; i < count; ++i) {
+    lua_pushinteger(_state, i + 1); // push index (key)
+    lua_gettable(_state, -2);
+    if (!lua_isnumber(_state, -1)) {
+      return false;
+    }
+    arr[i] = (float)lua_tonumber(_state, -1);
+    lua_pop(_state, 1); // pop value
+  }
+  return true;
+}
+
+float LuaTable::get_float_field(const char *key)
+{
+  SCOPED_OBJ([this](){lua_pop(_state, 1); });	// pop the value off the stack
+  // assumes the table with the field is pushed on the stack
+  lua_pushstring(_state, key);
+  lua_gettable(_state, -2);	// pop key, and push value on stack
+  if (!lua_isnumber(_state, -1)) {
+    LOG_WARNING_LN("Error reading value for key: %s", key);
+    throw std::runtime_error(__FUNCTION__);
+  }
+  return (float)lua_tonumber(_state, -1);
+}
+
+
+bool lua_init(lua_State **ll, const char *filename, bool run)
+{
+  lua_State *l = *ll = lua_open();
+  if (l == NULL)
+    return false;
+  luaL_openlibs(l);
+
+  if (luaL_loadfile(l,  filename)) {
+    LOG_WARNING_LN(lua_tostring(l, -1));
+    return false;
+  }
+
+  // update the package path to include the script's directory
+  luaL_dostring(l, string2::fmt("package.path = '%s/?.lua;' .. package.path", Path::get_path(filename)));
+
+  if (run) {
+    if (lua_pcall(l, 0, 0, 0)) {
+      LOG_WARNING_LN(lua_tostring(l, -1));
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool funky()
+{
+  return true;
+}
+
+bool RayTracer::load_scene(const string2& filename)
+{
+  lua_State *l = NULL;
+  if (!lua_init(&l, filename, true))
+    return false;
+
+  // load camera settings
+  LuaTable camera_table(l, "camera");
+
+  _camera._dist = camera_table.get_float_field("dist");
+  if (!camera_table.get_float_array("pos", &_camera._pos[0], 3)) 
+    return false;
+
+  float look_at[3];
+  if (!camera_table.get_float_array("look-at", look_at, 3))
+    return false;
+
+  if (!camera_table.get_float_array("up", &_camera._up[0], 3))
+    return false;
+
+  LuaTable scene_table(l, "scene");
+  scene_table.iterate(funky);
+
+
+  _force_update = true;
+  
 	return true;
 }
 
 bool RayTracer::init(int width, int height)
 {
-	lua_State *l;
-	if (!load_scene("scene1.lua", &l))
-		return false;
+  if (!FileWatcher::instance().add_file_changed("scene1.lua", fastdelegate::MakeDelegate(this, &RayTracer::load_scene), true))
+    return false;
 
-	objects.push_back(new Sphere(Vec3(-10, 0, -200), 10));
-	objects.push_back(new Sphere(Vec3(+10, 5, -200), 10));
-	objects.push_back(new Sphere(Vec3(0, 0, -240), 10));
-	objects.push_back(new Plane(Vec3(0, -10, 0), Vec3(0,1,0)));
+	_objects.push_back(new Sphere(Vec3(-10, 0, -200), 10));
+	_objects.push_back(new Sphere(Vec3(+10, 5, -200), 10));
+	_objects.push_back(new Sphere(Vec3(0, 0, -240), 10));
+	_objects.push_back(new Plane(Vec3(0, -10, 0), Vec3(0,1,0)));
 
   int ofs = 0;
   int num_jobs = height / 4;
   int lines = height / num_jobs;
   while (ofs <= height) {
-    datas.push_back(new RenderJobData(ofs, min(height-ofs, lines), width, height, &_camera, &objects));
-    events.push_back(&datas.back()->signal);
+    _datas.push_back(new RenderJobData(ofs, min(height-ofs, lines), width, height, &_camera, &_objects));
+    _events.push_back(&_datas.back()->signal);
     ofs += lines;
   }
 
@@ -165,13 +301,8 @@ bool RayTracer::init(int width, int height)
 
 void RayTracer::close()
 {
-	for (int i = 0; i < (int)objects.size(); ++i)
-		delete objects[i];
-	objects.clear();
-
-  for (int i = 0; i < (int)datas.size(); ++i)
-    delete datas[i];
-  datas.clear();
+  container_delete(_objects);
+  container_delete(_datas);
 }
 
 static void __cdecl RenderJob(LPVOID param)
@@ -225,51 +356,10 @@ static void __cdecl RenderJob(LPVOID param)
 
 void RayTracer::render(void *ptr, int width, int height)
 {
-
-  for (int i = 0; i < (int)datas.size(); ++i) {
-    datas[i]->ptr = ptr;
-    CurrentScheduler::ScheduleTask(RenderJob, datas[i]);
+  for (int i = 0; i < (int)_datas.size(); ++i) {
+    _datas[i]->ptr = ptr;
+    CurrentScheduler::ScheduleTask(RenderJob, _datas[i]);
   }
 
-  event::wait_for_multiple(&events[0], events.size(), true);
-
-/*
-	Vec3 o, d;
-	Vec3 light_pos(0,100,-150);
-
-	BGRA32 *p = (BGRA32 *)ptr;
-	for (int y = 0; y < height; ++y) {
-		for (int x = 0; x < width; ++x) {
-
-			float t;
-			_camera.ray_from_pixel(x, y, width, height, &o, &d);
-
-			if (Object *obj = find_intersection(objects, o, d, &t)) {
-				Vec3 p0 = o + t * d;
-
-				Vec3 probe = (light_pos - p0);
-				const float light_dist = probe.len();
-				normalize(probe);
-				float tmp;
-				Object *occulder = find_intersection(objects, p0 + 0.1f * probe, probe, &tmp);
-				if (occulder && tmp > 0 && tmp < light_dist) {
-					p->r = p->g = p->b = p->a = 0;
-				} else {
-					Vec3 l = normalize(light_pos - p0);
-					Vec3 n = obj->calc_normal(p0);
-					Vec3 v = normalize(_camera._pos - p0);
-					Vec3 h = normalize(l + v);
-					float spec = powf(dot(n, h), 32);
-					float diffuse = dot(n, l);
-					float ambient = 0.2f;
-					float col = min(1, max(0, diffuse + spec));
-					p->r = p->g = p->b = p->a = (uint8_t)(255 * col);
-				}
-			} else {
-				p->r = p->g = p->b = p->a = 0;
-			}
-			p++;
-		}
-	}
-  */
+  event::wait_for_multiple(&_events[0], _events.size(), true);
 }

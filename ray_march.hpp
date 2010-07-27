@@ -15,6 +15,6 @@ struct RayMarcher : public RayBase
 
   struct RenderJobData;
 
-	std::vector<RenderJobData *> datas;
-	std::vector<Concurrency::event *> events;
+	std::vector<RenderJobData *> _datas;
+	std::vector<Concurrency::event *> _events;
 };

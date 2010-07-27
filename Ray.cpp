@@ -13,6 +13,7 @@
 #include "ray.hpp"
 #include "camera.hpp"
 #include "ray_math.hpp"
+#include <celsus/file_watcher.hpp>
 
 extern "C"
 {
@@ -78,17 +79,20 @@ int _tmain(int argc, _TCHAR* argv[])
 	SDL_SetColorKey(g_font, SDL_SRCCOLORKEY, 0);
   SDL_EnableKeyRepeat(500, 50);
 
-	RayBase *ray = new RayTracer();
+  RayBase *ray = new RayTracer();
+  ray->_camera._pos = Vec3(0,4, 15);
+  ray->_camera._up = Vec3(0,1,0);
+  ray->_camera._dir = Vec3(0,0,-1);
+
 	if (!ray->init(width, height))
 		return 1;
 
-	ray->_camera._pos = Vec3(0,4, 15);
-	ray->_camera._up = Vec3(0,1,0);
-	ray->_camera._dir = Vec3(0,0,-1);
 
 	bool done = false;
-	bool first_time = true;
+  FileWatcher::instance().init();
 	while (!done) {
+
+    FileWatcher::instance().tick();
 
 		SDL_Event event;
 		bool redraw = false;
@@ -113,8 +117,7 @@ int _tmain(int argc, _TCHAR* argv[])
 			}
 		}
 
-		if (redraw || first_time) {
-			first_time = false;
+		if (redraw || ray->force_update() ) {
 			ray->_camera._dir = normalize(Vec3(0,0,-200) - ray->_camera._pos);
 
 			// scale the view plane by the aspect ratio of the bitmap to get square pixels
@@ -141,6 +144,7 @@ int _tmain(int argc, _TCHAR* argv[])
 			SDL_Flip(g_screen);
 		}
 	}
+  FileWatcher::instance().close();
 
 	ray->close();
 

@@ -1,8 +1,8 @@
 camera = {
 	["pos"] = {0, 0, 0},
-	["look-at"] = {0, 0, -200},
+	["look-at"] = {0, 0, -300},		-- ignored for now
 	["up"] = {0, 1, 0},
-	["dist"] = 200,
+	["dist"] = 300,
 }
 
 materials = {
